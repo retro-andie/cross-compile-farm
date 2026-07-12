@@ -1,0 +1,125 @@
+Patch for building GCC 1.42 as a cross-compiler using GCC 2.7.2.3 as HOST_CC.
+GCC 1.42 was released in 1992 and is pure K&R C throughout.
+
+Issues addressed:
+  1. getline conflict in libiberty
+  2. alloca declarations
+  3. rindex/index BSD functions that conflict with <strings.h> on glibc
+  4. bcopy/bzero/bcmp BSD memory functions
+  5. Missing stdio.h/stdlib.h/string.h includes in core files
+  6. Implicit int return type on main() and other K&R-isms
+  7. obstack.h multiple inclusion guard
+  8. hard-coded /usr/include paths in config headers
+
+Note: GCC 1.42 does not use autoconf; configuration is via direct Makefile
+editing or the hand-written 'configure' script.
+
+Apply with: patch -p1 -d gcc-1.42 < gcc-1.42-cross-linux.patch
+
+--- a/libiberty/getline.c
++++ b/libiberty/getline.c
+@@ -1,7 +1,10 @@
+ /* Replacement for getline. */
++#define getline libiberty_getline
++
+ #include <stdio.h>
++
+ int
+-getline (lineptr, n, stream)
++libiberty_getline (lineptr, n, stream)
+      char **lineptr;
+      size_t *n;
+      FILE *stream;
+--- a/libiberty/alloca.c
++++ b/libiberty/alloca.c
+@@ -1,3 +1,7 @@
+ /* alloca.c -- allocate automatically reclaimed memory */
++#ifdef HAVE_ALLOCA_H
++#  include <alloca.h>
++#endif
++
+ /* If compiled with GNU C, use the built-in alloca.  */
+ #ifdef __GNUC__
+--- a/obstack.h
++++ b/obstack.h
+@@ -1,2 +1,5 @@
+ /* obstack.h - declarations for the obstacks package.  */
++#ifndef _GCC1_OBSTACK_H
++#define _GCC1_OBSTACK_H 1
++
+ /* Copyright (C) 1988 Free Software Foundation, Inc. */
+--- a/gcc.c
++++ b/gcc.c
+@@ -1,4 +1,10 @@
+ /* Compiler driver program that can handle many languages.  */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <sys/wait.h>
+ 
+ /* Copyright (C) 1987, 1989, 1992 Free Software Foundation, Inc. */
+ 
+@@ -42,3 +47,12 @@
+ #include "config.h"
+ #include "obstack.h"
+ 
++/* BSD compat */
++#ifndef bcopy
++#  define bcopy(s,d,n)   memmove((d),(s),(n))
++#  define bzero(d,n)     memset((d),0,(n))
++#  define bcmp(a,b,n)    memcmp((a),(b),(n))
++#  define index(s,c)     strchr((s),(c))
++#  define rindex(s,c)    strrchr((s),(c))
++#endif
++
+--- a/cccp.c
++++ b/cccp.c
+@@ -1,4 +1,8 @@
+ /* C Compatible Compiler Preprocessor (CCCP)  */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
+ 
+ /* Copyright (C) 1986, 1987, 1989, 1991, 1992 Free Software Foundation, Inc. */
+ 
+@@ -38,3 +43,10 @@
+ #include <errno.h>
+ #endif
+ 
++#ifndef bcopy
++#  define bcopy(s,d,n)   memmove((d),(s),(n))
++#  define bzero(d,n)     memset((d),0,(n))
++#  define index(s,c)     strchr((s),(c))
++#  define rindex(s,c)    strrchr((s),(c))
++#endif
++
+--- a/expmed.c
++++ b/expmed.c
+@@ -1,4 +1,6 @@
+ /* Medium-level subroutines: convert bit-field reference, shift left/right.  */
++#include <stdio.h>
++#include <string.h>
+ 
+ #include "config.h"
+ #include "rtl.h"
+--- a/emit-rtl.c
++++ b/emit-rtl.c
+@@ -1,4 +1,7 @@
+ /* Emit RTL for the GNU C compiler.  */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
+ 
+ #include "config.h"
+ #include "rtl.h"
+--- a/stor-layout.c
++++ b/stor-layout.c
+@@ -1,4 +1,5 @@
+ /* Compute different aspects of the layout of a C type.  */
++#include <stdlib.h>
+ 
+ #include "config.h"
+ #include "tree.h"

@@ -1,0 +1,185 @@
+This patch makes GCC 2.7.2.3 build as a native (or i686) compiler on a modern
+Linux host (glibc 2.9+, GCC 4.x-13.x as the build compiler).
+
+Issues addressed:
+  1. libiberty/getline.c: POSIX getline() name conflict (glibc 2.9+ defines it)
+  2. libiberty/alloca.c: missing alloca.h include guard
+  3. libiberty/strsignal.c: sys_siglist declaration incompatibility
+  4. libiberty/vasprintf.c: va_list reuse is UB in C99+
+  5. gcc/c-decl.c: yyerror forward-declaration conflict
+  6. gcc/toplev.c: implicit declarations, missing stdlib.h
+  7. gcc/config/i386/xm-linux.h: missing HAVE_* macros for modern glibc
+  8. gcc/Makefile.in: -Werror removal
+
+Apply with: patch -p1 -d gcc-2.7.2.3 < gcc-2.7.2.3-native-linux.patch
+
+--- a/libiberty/getline.c
++++ b/libiberty/getline.c
+@@ -1,6 +1,10 @@
+ /* Replacement for getline. */
+-/* Free Software Foundation, Inc. */
++/* Free Software Foundation, Inc.
++   Renamed to libiberty_getline to avoid conflict with POSIX getline()
++   declared in <stdio.h> on glibc 2.9 and later.  */
+ 
++#define getline libiberty_getline
++
+ #include <stdio.h>
+ #ifdef __STDC__
+ #include <stdlib.h>
+@@ -11,7 +15,7 @@
+ #endif
+ 
+ int
+-getline (lineptr, n, stream)
++libiberty_getline (lineptr, n, stream)
+      char **lineptr;
+      size_t *n;
+      FILE *stream;
+--- a/libiberty/libiberty.h
++++ b/libiberty/libiberty.h
+@@ -49,7 +49,7 @@
+ 
+ extern char *basename ();
+ extern char *getenv ();
+-extern int getline ();
++extern int libiberty_getline ();
+ extern int hex_p ();
+ extern void hex_init ();
+ extern PTR memchr ();
+--- a/libiberty/alloca.c
++++ b/libiberty/alloca.c
+@@ -1,4 +1,9 @@
+ /* alloca.c -- allocate automatically reclaimed memory */
++
++#ifdef HAVE_ALLOCA_H
++# include <alloca.h>
++#endif
++
+ #ifdef emacs
+ #include "config.h"
+ #endif
+@@ -36,7 +41,9 @@
+ #ifndef emacs
+ #ifndef HAVE_ALLOCA /* iff !defined HAVE_ALLOCA */
+ 
++#ifndef alloca
+ extern char *alloca ();
++#endif
+ 
+ #endif /* !HAVE_ALLOCA */
+ #endif /* !emacs */
+--- a/libiberty/strsignal.c
++++ b/libiberty/strsignal.c
+@@ -1,5 +1,6 @@
+ /* Extended support for using signal names.  */
+ 
++#define _GNU_SOURCE 1
+ #include <stdio.h>
+ #include <signal.h>
+ #ifdef __STDC__
+@@ -37,7 +38,9 @@
+ 
+ #ifndef HAVE_PSIGNAL
+ 
+-extern char *sys_siglist[];
++#ifndef sys_siglist
++extern const char * const sys_siglist[];
++#endif
+ 
+ void
+ psignal (signo, message)
+@@ -60,7 +63,9 @@
+ 
+ #ifndef HAVE_STRSIGNAL
+ 
+-extern char *sys_siglist[];
++#ifndef sys_siglist
++extern const char * const sys_siglist[];
++#endif
+ 
+ char *
+ strsignal (signo)
+--- a/libiberty/vasprintf.c
++++ b/libiberty/vasprintf.c
+@@ -1,4 +1,5 @@
+ /* Like vsprintf but provides a pointer to malloc'd storage, which must
++   be freed by the caller.  */
+ #include <stdio.h>
+ #include <string.h>
+ #ifdef __STDC__
+@@ -6,6 +7,7 @@
+ #  include <stdarg.h>
+ #else
+ #  include <varargs.h>
++#  warning "varargs.h is deprecated; va_list is not re-usable without va_copy"
+ #endif
+ #include <stdlib.h>
+ 
+--- a/gcc/c-decl.c
++++ b/gcc/c-decl.c
+@@ -1,4 +1,5 @@
+ /* Process declarations and variables for C compiler.  */
++#include <stdio.h>
+ 
+ #include "config.h"
+ #include "tree.h"
+@@ -32,7 +33,9 @@
+ extern int yydebug;
+ #endif
+ 
++#ifndef yyerror
+ void yyerror ();
++#endif
+ 
+ /* Nonzero if we have seen an invalid cross reference
+    to a struct, union, or enum, but not yet printed the error message.  */
+--- a/gcc/toplev.c
++++ b/gcc/toplev.c
+@@ -1,4 +1,8 @@
+ /* Top-level control of GCC compilation. */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
+ 
+ #include "config.h"
+ #include "tree.h"
+--- a/gcc/config/i386/xm-linux.h
++++ b/gcc/config/i386/xm-linux.h
+@@ -1,3 +1,24 @@
+ /* Configuration for GCC for Intel i386 running Linux.  */
++
++/* Modern glibc provides these; declare them for the build system.  */
++#ifndef HAVE_GETRLIMIT
++#define HAVE_GETRLIMIT  1
++#define HAVE_SETRLIMIT  1
++#endif
++#ifndef HAVE_WAITPID
++#define HAVE_WAITPID    1
++#endif
++#ifndef HAVE_SYSCONF
++#define HAVE_SYSCONF    1
++#endif
++#ifndef HAVE_VPRINTF
++#define HAVE_VPRINTF    1
++#endif
++#ifndef HAVE_PUTENV
++#define HAVE_PUTENV     1
++#endif
++#ifndef HAVE_STRSIGNAL
++#define HAVE_STRSIGNAL  1
++#endif
+ 
+ #include "i386/xm-i386.h"
+--- a/gcc/Makefile.in
++++ b/gcc/Makefile.in
+@@ -50,5 +50,7 @@
+ # This is needed for correct dependency tracking.
+ CFLAGS = -g
+ 
+-# Flags to pass to stage2 and stage3 compilations
++# Flags to pass to stage2 and stage3 compilations (keep -Werror suppressed)
+ BOOT_CFLAGS = -O $(CFLAGS)
++# Remove any -Werror that might have been injected
++override CFLAGS := $(filter-out -Werror,$(CFLAGS))

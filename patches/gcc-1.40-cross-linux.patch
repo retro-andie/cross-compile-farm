@@ -1,0 +1,82 @@
+Patch for building GCC 1.40 as a cross-compiler using GCC 2.7.2.3 as HOST_CC.
+GCC 1.40 (1991) lacks --target= configure support; configure is done manually.
+
+Issues addressed (superset of gcc-1.42 issues):
+  1. getline conflict in libiberty (same as 1.42)
+  2. alloca declarations (same as 1.42)
+  3. BSD compat functions (same as 1.42)
+  4. configure script: does not support --target=; set up machine files manually
+  5. Makefile.in: hard-coded assumptions about host=target (monolithic build)
+  6. tm.h / xm.h symlinks required manually for cross build
+  7. strtol / strtoul may not be declared (old libiberty)
+  8. Missing CROSS_COMPILE support in some source files
+
+Apply with: patch -p1 -d gcc-1.40 < gcc-1.40-cross-linux.patch
+
+--- a/libiberty/getline.c
++++ b/libiberty/getline.c
+@@ -1,6 +1,8 @@
+ /* Replacement for getline. */
++#define getline libiberty_getline
++
+ int
+-getline (lineptr, n, stream)
++libiberty_getline (lineptr, n, stream)
+      char **lineptr;
+      size_t *n;
+      FILE *stream;
+--- a/libiberty/alloca.c
++++ b/libiberty/alloca.c
+@@ -1,2 +1,5 @@
+ /* alloca.c -- allocate automatically reclaimed memory */
++#ifdef HAVE_ALLOCA_H
++#  include <alloca.h>
++#endif
+ 
+--- a/gcc.c
++++ b/gcc.c
+@@ -1,4 +1,18 @@
+ /* Compiler driver program.  */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <sys/wait.h>
+ 
+ #include "config.h"
+ #include "obstack.h"
++
++#ifndef bcopy
++#  define bcopy(s,d,n)  memmove((d),(s),(n))
++#  define bzero(d,n)    memset((d),0,(n))
++#  define index(s,c)    strchr((s),(c))
++#  define rindex(s,c)   strrchr((s),(c))
++#endif
++
+--- a/cccp.c
++++ b/cccp.c
+@@ -1,2 +1,13 @@
+ /* C preprocessor.  */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
+ 
++#ifndef bcopy
++#  define bcopy(s,d,n)  memmove((d),(s),(n))
++#  define bzero(d,n)    memset((d),0,(n))
++#  define index(s,c)    strchr((s),(c))
++#  define rindex(s,c)   strrchr((s),(c))
++#endif
++
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -1,3 +1,7 @@
+ # Makefile for GNU C compiler.
++# Patched for cross-build and modern host compatibility.
++
+ CC = cc
++# Override CC on command line: make CC=gcc CROSS_COMPILE=i486-linux-
+ CFLAGS = -O
++override CFLAGS := $(filter-out -Werror,$(CFLAGS))

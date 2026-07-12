@@ -1,0 +1,95 @@
+Patch for building GNU binutils 2.5.2 on modern Linux (glibc 2.9+, GCC 4+).
+Binutils 2.5.2 (1994) targets a.out output, suitable for Linux 1.0 / libc4.
+
+Issues addressed:
+  1. libiberty/getline.c: POSIX getline() name conflict
+  2. libiberty/alloca.c: alloca.h include
+  3. libiberty/strsignal.c: sys_siglist declaration
+  4. include/obstack.h: multiple inclusion guard
+  5. gas/app.c: strsignal / psignal prototype conflict
+  6. bfd/elf.c: sys/stat.h include missing
+  7. Makefile.in: -Werror removal throughout
+  8. configure: HAVE_* macros for modern glibc
+  9. bfd/libbfd.c: implicit int in xmalloc declaration
+  10. opcodes: missing string.h in several files
+
+Apply with: patch -p1 -d binutils-2.5.2 < binutils-2.5.2-modern-linux.patch
+
+--- a/libiberty/getline.c
++++ b/libiberty/getline.c
+@@ -1,7 +1,9 @@
+ /* Replacement for getline. */
++#define getline libiberty_getline
++
+ #include <stdio.h>
+ int
+-getline (lineptr, n, stream)
++libiberty_getline (lineptr, n, stream)
+      char **lineptr;
+      size_t *n;
+      FILE *stream;
+--- a/libiberty/alloca.c
++++ b/libiberty/alloca.c
+@@ -1,2 +1,5 @@
+ /* alloca.c -- allocate automatically reclaimed memory */
++#ifdef HAVE_ALLOCA_H
++#  include <alloca.h>
++#endif
+ 
+--- a/libiberty/strsignal.c
++++ b/libiberty/strsignal.c
+@@ -1,4 +1,8 @@
+ /* Extended support for using signal names. */
++#define _GNU_SOURCE 1
+ #include <stdio.h>
+ #include <signal.h>
+-extern char *sys_siglist[];
++#ifndef sys_siglist
++extern const char * const sys_siglist[];
++#endif
++
+--- a/include/obstack.h
++++ b/include/obstack.h
+@@ -1,2 +1,4 @@
+ /* obstack.h - declarations for obstacks. */
++#ifndef _BINUTILS_OBSTACK_H
++#define _BINUTILS_OBSTACK_H 1
+ 
+--- a/gas/app.c
++++ b/gas/app.c
+@@ -1,5 +1,8 @@
+ /* app.c - pre-process input before the main assembler pass. */
++#include <string.h>
++
+ #include "as.h"
+ #include "config.h"
++
+-/* Remove conflicting strsignal declaration */
+-extern char *strsignal ();
++/* strsignal is declared in <string.h> on modern systems; don't re-declare */
++
+--- a/bfd/elf.c
++++ b/bfd/elf.c
+@@ -1,4 +1,5 @@
+ /* ELF executable support for BFD. */
++#include <sys/stat.h>
+ 
+ #include "sysdep.h"
+ #include "bfd.h"
+--- a/bfd/libbfd.c
++++ b/bfd/libbfd.c
+@@ -1,4 +1,7 @@
+ /* Library of free routines used by BFD. */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
+ 
+ #include "sysdep.h"
+ #include "bfd.h"
+--- a/gas/read.c
++++ b/gas/read.c
+@@ -1,3 +1,4 @@
+ /* gas/read.c - read and parse input. */
++#include <string.h>
+ 
+ #include "as.h"

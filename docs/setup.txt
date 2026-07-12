@@ -1,0 +1,908 @@
+CROSS-COMPILER BUILD PROCEDURE
+
+CONTENTS
+--------
+ 1.  Overview
+ 2.  GCC and Binutils Version Support Matrix
+ 3.  Host System Requirements
+ 4.  Sysroot Setup
+ 5.  Installation
+ 6.  Usage and Examples
+ 7.  Platform-Specific Notes
+ 8.  Building Old GCC Versions on Modern Hosts
+ 9.  Linux libc4 and libc5 Sysroot Setup
+10.  Canadian Cross: Compilers for Old UNIX Hosts
+11.  Troubleshooting
+
+
+1. OVERVIEW
+-----------
+These scripts build GNU cross-compilers (GCC and binutils) that run on a
+modern Linux or NetBSD host but target legacy UNIX systems.
+
+The build-cross.sh script handles:
+  - Automatic version selection based on target platform
+  - Downloading GCC and binutils sources from GNU mirrors
+  - Installing/building GCC prerequisites (GMP, MPFR, MPC)
+  - Applying compatibility patches for old GCC on modern hosts
+  - Building and installing the cross-compiler toolchain
+
+
+2. GCC AND BINUTILS VERSION SUPPORT MATRIX
+-------------------------------------------
+The tables show first and last GCC versions known to support each target.
+Default versions used by the script are the last-supported versions.
+"current" in the Last GCC column means support is still active.
+
+Solaris
+  Platform         Arch        First GCC  Last GCC   Notes
+  ---------------------------------------------------------------
+  Solaris 2.3      SPARC       2.3        4.8.5      SunOS 5.3
+  Solaris 2.4      SPARC       2.5        4.8.5      SunOS 5.4
+  Solaris 2.5      SPARC/x86   2.5        8.5.0      SunOS 5.5
+  Solaris 2.6      SPARC/x86   2.7        8.5.0      SunOS 5.6
+  Solaris 7        SPARC/x86   2.8        9.5.0      SunOS 5.7
+  Solaris 8        SPARC/x86   2.95       9.5.0      SunOS 5.8
+  Solaris 9        SPARC/x86   3.0        12.4.0     SunOS 5.9
+  Solaris 10       SPARC/x86   3.3        current    SunOS 5.10
+  Solaris 11       SPARC/x86   4.5        current    SunOS 5.11
+
+  GCC support removal timeline for Solaris:
+  - GCC 9  (2019): removed support for Solaris < 7 (SunOS 5.5, 5.6)
+  - GCC 10 (2020): removed support for Solaris 7, 8 (SunOS 5.7, 5.8)
+  - GCC 14 (2024): removed support for Solaris 9 (SunOS 5.9)
+  - Solaris 10 and 11 remain supported in GCC 14+
+
+  Binutils: Modern binutils (2.40+) supports all Solaris targets.
+
+AIX
+  Platform         Arch        First GCC  Last GCC   Notes
+  ---------------------------------------------------------------
+  AIX 3.2          RS6000      2.6        3.4.6      RS6000 hardware (pre-PPC)
+  AIX 4.1          PowerPC     2.7        6.5.0      GCC 7 removed AIX 4
+  AIX 4.2          PowerPC     2.8        6.5.0
+  AIX 4.3          PowerPC     2.95       6.5.0
+  AIX 5.1          PowerPC     3.3        current
+  AIX 5.2          PowerPC     3.3        current
+  AIX 5.3          PowerPC     3.4        current
+  AIX 6.1          PPC64       4.2        current
+  AIX 7.1          PPC64       4.6        current
+  AIX 7.2          PPC64       4.8        current
+  AIX 7.3          PPC64       9.1        current
+
+  AIX notes:
+  - AIX uses XCOFF (eXtended Common Object File Format), not ELF
+  - GNU binutils fully supports XCOFF; cross-compilation to AIX is well-tested
+  - AIX 3.2 used the older RS6000 POWER1 ABI; triple: rs6000-ibm-aix3.2
+  - AIX 4.x-5.x: powerpc-ibm-aix5.3 (32-bit default mode)
+  - AIX 6.1+: powerpc64-ibm-aix6.1 (64-bit capable)
+  - Libraries on AIX are .a archives containing shared member objects
+
+  Binutils: 2.20 recommended for AIX 3.x; 2.28 for AIX 4.x; 2.40+ for AIX 5+
+
+HP-UX
+  Platform         Arch          First GCC  Last GCC   Notes
+  -----------------------------------------------------------------
+  HP-UX 9.x        PA-RISC 1.1   2.5        3.4.6      hppa1.1-hp-hpux9
+  HP-UX 10.x       PA-RISC 2.0   2.7        7.5.0      Removed in GCC 8
+  HP-UX 11.0       PA-RISC 2.0W  2.95       11.4.0     Removed in GCC 12
+  HP-UX 11.11      PA-RISC 2.0W  2.95       11.4.0     Removed in GCC 12
+  HP-UX 11.23      IA-64         3.3        current    Itanium
+  HP-UX 11.31      IA-64         4.0        current    HP-UX 11i v3
+
+  HP-UX notes:
+  - PA-RISC targets use SOM (System Object Model) object format
+  - IA-64 HP-UX uses ELF
+  - GNU binutils gas/ld have SOM support; use --enable-targets=all
+  - GCC 8  (2018): removed HP-UX [7-10].x on PA-RISC support
+  - GCC 12 (2022): removed HP-UX 11.x on PA-RISC support
+  - IA-64 HP-UX remains supported in current GCC
+
+  Binutils: 2.20 for HP-UX 9; 2.36 for HP-UX 10/11 PA-RISC; 2.40+ for IA-64
+
+TRU64 UNIX / DIGITAL UNIX / OSF/1
+  Platform           Arch   First GCC  Last GCC   Notes
+  ---------------------------------------------------------
+  OSF/1 3.x          Alpha  2.7        3.4.6      DEC OSF/1 3.x
+  Digital UNIX 4.0   Alpha  2.8        4.6.4      Same as Tru64 4.0
+  Tru64 4.0          Alpha  2.8        4.6.4      alpha-dec-osf4.0
+  Tru64 5.0          Alpha  3.0        4.6.4      alpha-dec-osf5.0
+  Tru64 5.1          Alpha  3.0        4.6.4      alpha-dec-osf5.1 (last release)
+
+  Tru64 notes:
+  - GCC 4.6 deprecated OSF/Tru64; GCC 4.7 removed support entirely
+  - Last supported GCC version: 4.6.4
+  - Target triple: alpha-dec-osf5.1 (also accepted: alpha-dec-tru64)
+  - Uses Alpha EV4/EV5/EV6/EV67 architecture
+  - ELF object format (Alpha used ELF throughout; ECOFF is MIPS-specific)
+
+  Binutils: binutils 2.38+ still supports Alpha; 2.40 recommended.
+
+IRIX
+  Platform         Arch        First GCC  Last GCC   Notes
+  ---------------------------------------------------------------
+  IRIX 5.2         MIPS R4000  2.7        4.9.4      o32 ABI only
+  IRIX 5.3         MIPS R4000  2.7        4.9.4      o32 ABI
+  IRIX 6.2         MIPS R5000  2.8        4.9.4      n32/o32 ABI
+  IRIX 6.4         MIPS R5000  2.8        4.9.4
+  IRIX 6.5         MIPS R5000+ 2.8        8.5.0      Last IRIX; deprecated in GCC 8
+
+  IRIX notes:
+  - GCC 8  (2018): deprecated IRIX support
+  - GCC 9  (2019): removed IRIX support
+  - Last supported GCC version: 8.5.0
+  - IRIX ABIs: o32 (-mabi=32), n32 (-mabi=n32, default), n64 (-mabi=64)
+  - IRIX 5.x uses MIPS ECOFF; IRIX 6.x uses SGI ELF
+  - Target triples: mips-sgi-irix6.5 (big-endian), mipsel-sgi-irix6.5
+
+  Binutils: 2.32 for IRIX 5.x; 2.38 for IRIX 6.5.
+
+BSD
+  Platform         Arch        First GCC  Last GCC   Notes
+  ---------------------------------------------------------------
+  NetBSD 1.x       Various     2.7        3.4.6      Old a.out ABI (1.0-1.5)
+  NetBSD 2.0+      Various     3.3        current    ELF ABI
+  NetBSD 3.x-10.x  Various     4.x        current
+  FreeBSD 2.x      i386        2.7        3.4.6      a.out ABI
+  FreeBSD 3.x      i386        2.8        3.4.6      Transition to ELF
+  FreeBSD 4.x      i386        3.0        current    Full ELF
+  FreeBSD 5.x+     i386/amd64  3.3        current
+  OpenBSD 2.x-3.x  Various     2.95       3.4.6
+  OpenBSD 4.x+     Various     3.4        current
+  OpenBSD 7.x      Various     9.x        current
+
+  BSD notes:
+  - NetBSD, FreeBSD 4+, OpenBSD 4+ all use ELF
+  - FreeBSD 2.x-3.x and NetBSD 1.x used a.out object format
+  - All modern BSD targets are well-supported in current GCC
+  - NetBSD has ports for the widest range of architectures
+
+  Binutils: Any modern version (2.40+) for modern BSDs.
+            2.17 for FreeBSD 2.x/3.x a.out targets.
+
+Linux
+  Platform         Arch        First GCC  Last GCC   Notes
+  ---------------------------------------------------------------
+  Linux 2.2/2.4    Various     2.95       current    Old kernels, glibc 2.1-2.3
+  Linux 2.6+       Various     3.x        current    Modern Linux
+  Linux 3.x-6.x    Various     4.x        current    All current distributions
+  Linux (musl)     Various     5.x        current    musl libc distributions
+
+  Linux notes:
+  - Linux support has been continuous throughout GCC history
+  - For old glibc (< 2.14), use matching glibc headers in sysroot
+  - Common triples: i686-linux-gnu, x86_64-linux-gnu, aarch64-linux-gnu
+  - For cross-Linux, use the exact glibc version that matches target distro
+
+SCO/Microsoft UNIX
+  Platform              Arch   First GCC  Last GCC   Notes
+  -----------------------------------------------------------
+  SCO OpenServer 3.x    i386   2.5        3.4.6      SCO UNIX 3.2v4/v5
+  SCO OpenServer 5.x    i386   2.7        4.9.4
+  UnixWare 2.x          i386   2.7        3.4.6
+  UnixWare 7.x          i386   2.8        4.9.4
+  Interix/SFU           x86    3.x        4.9.4      Windows Services for UNIX
+
+Older UNIX
+  Platform              Arch          First GCC  Last GCC  Binutils  Notes
+  -------------------------------------------------------------------------
+  SunOS 3.5             SPARC/m68k    2.2        4.7.4     2.28     a.out
+  SunOS 4.0             SPARC/m68k    2.2        4.7.4     2.28     a.out
+  SunOS 4.1.x           SPARC/m68k    2.3        4.7.4     2.28     a.out
+  ULTRIX 4.x            MIPS/VAX      2.5        3.4.6     2.17     ECOFF
+  ULTRIX 2.x-3.x        VAX           2.2        3.4.6     2.17     a.out/ECOFF
+  NeXTStep 1.x-2.x      m68k          2.1        2.95.3    2.17     Mach-O (*)
+  NeXTStep 3.x          m68k/i386     2.3        3.4.6     2.17     Mach-O (*)
+  OpenStep 4.x          m68k/i386     2.7        3.4.6     2.17     Mach-O (*)
+  DYNIX 3.x             i386          2.2        3.4.6     2.17     a.out
+  DYNIX/ptx 4.x         i386          2.7        4.9.4     2.32     ELF
+  Linux 1.0-1.2         i486          2.5        2.7.2.3   2.5.2    a.out/libc4 (**)
+  Linux 2.0-2.2         i486          2.5        2.95.3    2.8.1    ELF/libc5 (**)
+
+  (*) NeXTStep/OpenStep targets require NeXT-patched GCC for Mach-O support.
+      Standard GCC generates ELF or a.out; Mach-O output requires the NeXT patches.
+  (**) See Section 9 for libc4/libc5 sysroot setup instructions.
+
+EARLY GCC VERSION HISTORY (for historical platform cross-compilers)
+  GCC Era    Versions     Notes
+  -----------------------------------------------------------------------
+  Era 1      1.0-1.42     K&R C source; very difficult to build on modern
+                          hosts; requires special handling (see Section 8)
+  Era 2 early 2.0-2.4    Positional configure args; parallel build issues
+  Era 2 late  2.5-2.8    Standard configure; builds with CFLAGS patches
+  Era 2-95   2.95.x      Last GCC 2.x series; widely supported
+  Modern     3.x - 4.x   Standard build process; widely supported
+  Current    5.x+         Active support; requires g++ for build system
+
+  Binutils version history for old targets:
+  2.5.2   a.out support; for Linux 1.0 i486 targets
+  2.6     a.out + early ELF; transition era
+  2.7-2.8 ELF + ECOFF + a.out; libc5/Linux 2.0 era
+  2.9-2.11 Improved ELF; most UNIX targets
+  2.12-2.16 All modern UNIX targets; XCOFF/SOM improvements
+  2.17    Last binutils supporting HP-UX PA-RISC SOM fully
+  2.20+   Modern ELF+; dropped some very old format support
+  2.28+   Last binutils with full SunOS 4.x a.out support
+  2.38+   Current stable series; all modern UNIX targets
+
+
+3. HOST SYSTEM REQUIREMENTS
+-----------------------------
+The build host must be a modern Linux (x86_64) or NetBSD (amd64) system.
+
+Required tools:
+  - GCC (host C compiler)   >= 4.8  (for building GCC 5.x+)
+                            >= 3.4  (for building GCC 3.x or 4.x)
+  - G++ (host C++ compiler) >= 4.8  (required by GCC 5+ build system)
+  - GNU make                >= 3.80
+  - GNU flex                >= 2.5.4
+  - GNU bison               >= 1.28
+  - GNU texinfo             >= 4.7
+  - gawk or mawk
+  - m4, diffutils, patch
+  - tar, gzip, bzip2, xz-utils
+  - curl or wget (source download)
+  - sha256sum or shasum (checksum verification)
+
+For GCC 4.3 and later (most targets):
+  - GMP   >= 4.3.2   (GNU Multiple Precision Arithmetic Library)
+  - MPFR  >= 2.4.2   (Multiple Precision Floating-Point library)
+  - MPC   >= 0.8.1   (Multiple Precision Complex library)
+
+  These can be installed system-wide or placed inside the GCC source tree.
+  The script handles this automatically via contrib/download_prerequisites.
+
+For GCC 4.8 and later (optional but recommended):
+  - ISL   >= 0.15    (Integer Set Library, for Graphite loop optimizations)
+
+Make sure that xz, curl, GCC is installed.
+
+NOTE: For building GCC 2.95.x or early 3.x on modern Linux, the host compiler
+may reject old C code. See Section 8 for workarounds.
+
+NOTE: For building GCC 1.x (era1) on modern Linux, the build scripts
+automatically build GCC 2.7.2.3 as an intermediate (bootstrap) compiler and
+use it as HOST_CC for the era1 build. See Section 8 (Bootstrap GCC) for 
+details and manual bootstrap instructions.
+
+
+4. SYSROOT SETUP
+-----------------
+A sysroot mirrors the target system's filesystem with at minimum:
+
+  <sysroot>/usr/include/     -- Target system header files
+  <sysroot>/usr/lib/         -- Target system libraries (.a, .so, .sl)
+  <sysroot>/lib/             -- Target core libraries
+
+Default sysroot location: /opt/sysroots/<target-triple>/
+
+Example: Solaris 10 SPARC (target triple: sparc-sun-solaris2.10)
+  /opt/sysroots/sparc-sun-solaris2.10/
+    usr/
+      include/      (from Solaris /usr/include/*)
+      lib/          (from Solaris /usr/lib/*.{a,so*})
+      lib/sparcv9/  (64-bit Solaris libraries)
+    lib/            (from Solaris /lib/*.{so*})
+
+IMPORTANT: Preserve symbolic links. Shared library symlinks such as
+  libm.so -> libm.so.1  or  libm.so.1 -> libm.so.1.0
+are required for linking to work correctly.
+
+Solaris sysroot notes:
+  - Copy /usr/include, /usr/lib, /lib
+
+AIX sysroot notes:
+  - Copy /usr/include
+  - Copy /usr/lib/*.a (AIX archives contain shared objects as members)
+  - Copy /lib/*.a
+  - The bos.adt.includes fileset provides most needed headers
+
+HP-UX PA-RISC sysroot notes:
+  - Include both .a archives and .sl shared libraries
+  - /usr/lib/pa20_64/ for 64-bit (PA-RISC 2.0W) libraries
+  - The HP-UX SDK/Porting Kit provides headers
+
+HP-UX IA-64 sysroot notes:
+  - Copy /usr/include, /usr/lib, /lib
+
+Tru64 sysroot notes:
+  - Copy /usr/include (many alpha-specific headers)
+  - Copy /usr/lib/*.{a,so*} and /usr/shlib/*.so*
+  - Tru64 CXML math libraries may be needed for math-heavy code
+
+Minimum headers needed for C cross-compilation:
+  stdio.h stdlib.h string.h unistd.h sys/types.h sys/stat.h
+  fcntl.h errno.h limits.h time.h stddef.h stdarg.h
+
+
+5. INSTALLATION
+----------------
+Step 1: Ensure host prerequisites are met (Section 3)
+
+Step 2: Set up the sysroot (Section 4)
+
+Step 3: Configure installation directories:
+  export CROSS_PREFIX=/opt/cross
+  export CROSS_SYSROOT=/opt/sysroots
+
+Step 4: Run the build:
+  ./build-cross.sh <platform> <version>
+
+The script will:
+  a. Identify target triple and recommended GCC/binutils versions
+  b. Download sources (~150-600 MB depending on versions)
+  c. Verify checksums
+  d. Handle GCC prerequisites (GMP/MPFR/MPC) via download_prerequisites
+  e. Apply compatibility patches for old GCC on modern hosts
+  f. Build cross-binutils (~10-20 minutes)
+  g. Build cross-GCC front-ends (~30-90 minutes)
+
+Build artifacts:
+  Sources:      $CROSS_SRCDIR       (default: /opt/cross-src)
+  Build dirs:   $CROSS_BUILDDIR     (default: /tmp/cross-build-$$)
+  Installation: $CROSS_PREFIX       (default: /opt/cross)
+
+After installation:
+  $CROSS_PREFIX/bin/<triple>-gcc
+  $CROSS_PREFIX/bin/<triple>-g++
+  $CROSS_PREFIX/bin/<triple>-as
+  $CROSS_PREFIX/bin/<triple>-ld
+  $CROSS_PREFIX/bin/<triple>-ar
+  $CROSS_PREFIX/bin/<triple>-objdump
+  (etc.)
+
+
+6. USAGE AND EXAMPLES
+----------------------
+Basic:
+  ./build-cross.sh <platform> <version>
+
+Full options:
+  ./build-cross.sh [options] <platform> <version>
+
+  -a <arch>   Architecture override: sparc, x86, x86_64, ppc, ppc64, mips,
+                  mips64, alpha, ia64, parisc, arm, aarch64
+  -g <ver>    GCC version override (e.g., 4.6.4, 8.5.0, 13.3.0)
+  -b <ver>    Binutils version override (e.g., 2.28, 2.40)
+  -p <dir>    Install prefix (default: /opt/cross)
+  -s <dir>    Sysroot base directory (default: /opt/sysroots)
+  -S <dir>    Exact sysroot path (overrides auto-detection from -s)
+  -j <n>      Parallel make jobs (default: auto-detect nproc/ncpu)
+  -d <dir>    Build work directory (default: /tmp/cross-build-PID)
+  -D <dir>    Source download directory (default: /opt/cross-src)
+  -H <triple> Canadian cross: the compiler will RUN on <triple>, not the
+              build machine.  Requires BUILD→HOST cross-compiler already
+              installed.  Example: -H sparc-sun-solaris2.6
+  -r          Build runtime libraries (libgcc, libstdc++) -- requires
+              complete sysroot with target libc
+  -k          Keep build directory after successful build
+  -n          Dry run: show what would happen
+  -v          Verbose output
+  -h          Show help
+
+Environment overrides:
+  CROSS_PREFIX          Installation prefix
+  CROSS_SYSROOT         Sysroot base directory
+  CROSS_SRCDIR          Source download directory
+  MAKE_JOBS             Parallel build jobs
+  HOST_CC               Host C compiler (default: gcc)
+  HOST_CXX              Host C++ compiler (default: g++)
+  GNU_MIRROR            GNU FTP mirror (default: https://ftpmirror.gnu.org)
+  COMPILER_HOST         Canadian cross host triple (same as -H)
+  COMPILER_HOST_SYSROOT Sysroot for the COMPILER_HOST system
+
+Examples:
+  # Solaris 10 SPARC (default: latest GCC supporting Solaris 10)
+  ./build-cross.sh solaris 10
+
+  # Solaris 10 x86
+  ./build-cross.sh -a x86 solaris 10
+
+  # Solaris 8 SPARC using last supported GCC (9.5.0)
+  ./build-cross.sh solaris 8
+
+  # Tru64 5.1 - will automatically use GCC 4.6.4 (last supported)
+  ./build-cross.sh tru64 5.1
+
+  # HP-UX 11.11 PA-RISC (last supported: GCC 11.4.0)
+  ./build-cross.sh hpux 11.11
+
+  # HP-UX 11.31 IA-64 (still supported; uses latest GCC)
+  ./build-cross.sh -a ia64 hpux 11.31
+
+  # IRIX 6.5 (last supported: GCC 8.5.0)
+  ./build-cross.sh irix 6.5
+
+  # AIX 3.2 (RS6000 hardware; uses GCC 3.4.6)
+  ./build-cross.sh aix 3.2
+
+  # AIX 5.3 PowerPC (uses latest GCC)
+  ./build-cross.sh aix 5.3
+
+  # AIX 7.1 64-bit
+  ./build-cross.sh -a ppc64 aix 7.1
+
+  # FreeBSD 13.2 amd64
+  ./build-cross.sh -a x86_64 freebsd 13.2
+
+  # NetBSD 9.3 i386
+  ./build-cross.sh -a x86 netbsd 9.3
+
+  # OpenBSD 7.4 amd64
+  ./build-cross.sh -a x86_64 openbsd 7.4
+
+  # Linux amd64 (e.g., cross-compile from NetBSD host to Linux)
+  ./build-cross.sh -a x86_64 linux 6.x
+
+  # Older GCC specified explicitly
+  ./build-cross.sh -g 3.4.6 -b 2.17 freebsd 3.5
+
+  # Custom prefix and sysroot
+  ./build-cross.sh -p /usr/local/cross -S /mnt/solaris10 solaris 10
+
+  # Build with target runtime libraries (needs complete sysroot)
+  ./build-cross.sh -r aix 5.3
+
+  # Historical platforms
+  ./build-cross.sh sunos4 4.1.4          # SunOS 4.1.4 SPARC (a.out, GCC 4.7.4)
+  ./build-cross.sh -a m68k sunos4 4.1.3  # SunOS 4.1.3 m68k (Sun-3)
+  ./build-cross.sh ultrix 4.4            # ULTRIX 4.4 MIPS (ECOFF)
+  ./build-cross.sh -a vax ultrix 4.3     # ULTRIX 4.3 VAX
+  ./build-cross.sh -a m68k nextstep 3.3  # NeXTStep 3.3 m68k (Mach-O)
+
+  # Linux libc4/libc5 era
+  ./build-cross.sh linux1 1.0            # Linux 1.0, libc4, a.out, GCC 2.7.2.3
+  ./build-cross.sh linux2 2.0            # Linux 2.0, libc5, ELF, GCC 2.7.2.3
+  ./build-cross.sh -g 2.95.3 linux2 2.2  # Linux 2.2, libc5, ELF, GCC 2.95.3
+
+  # Canadian cross (compiler to run on Solaris 2.6, target Tru64)
+  ./build-cross.sh -H sparc-sun-solaris2.6 tru64 5.1
+
+  # Dry run to preview the build without doing anything
+  ./build-cross.sh -n solaris 10
+  ./build-cross.sh -n linux2 2.0
+
+Using the cross-compiler:
+  export PATH=/opt/cross/bin:$PATH
+
+  # Compile for Solaris 10 SPARC
+  sparc-sun-solaris2.10-gcc -o hello hello.c
+
+  # Compile for Tru64 5.1
+  alpha-dec-osf5.1-gcc -o hello hello.c
+
+  # Compile for IRIX 6.5 (n32 ABI, default)
+  mips-sgi-irix6.5-gcc -o hello hello.c
+  # IRIX 6.5 with 64-bit ABI:
+  mips-sgi-irix6.5-gcc -mabi=64 -o hello hello.c
+
+  # Compile for AIX 5.3
+  powerpc-ibm-aix5.3-gcc -o hello hello.c
+
+  # Compile for HP-UX 11.11 PA-RISC
+  hppa2.0w-hp-hpux11.11-gcc -o hello hello.c
+
+
+7. PLATFORM-SPECIFIC NOTES
+----------------------------
+
+SOLARIS
+  The Solaris sysroot must include:
+    /usr/include, /usr/lib, /lib, and optionally /usr/ucbinclude, /usr/ucblib
+  For 64-bit SPARC: /usr/lib/sparcv9 and /usr/include/sys (SPARC-specific)
+  Solaris 10+ can use Sun Studio headers in /opt/SUNWspro/prod/include
+
+  The cross-compiler generates SPARC v8+ or v9 code; for strict SPARC v8:
+    sparc-sun-solaris2.x-gcc -mcpu=v8 hello.c
+
+AIX
+  AIX libraries are .a archives containing shared-memory members (.so):
+    ar -X32_64 xvf libfoo.a  (extract all members on AIX itself)
+  For the sysroot, copy entire .a files -- do not extract them.
+  AIX 64-bit requires -maix64 flag or use powerpc64-ibm-aix* triple.
+  The bos.adt.include, bos.adt.lib, bos.adt.libm filesets provide headers.
+
+HP-UX
+  PA-RISC HP-UX libraries use .sl suffix (shared library) and .a (archive).
+  The sysroot needs both: /usr/lib/*.{a,sl} and /usr/lib/pa20_64/*.{a,sl}
+  HP-UX 11.23 introduced both PA-RISC and IA-64; the script defaults to IA-64
+    for version 11.23 and later unless -a parisc is specified.
+  HP-UX Developer's Toolkit provides additional headers and import libraries.
+
+TRU64 / OSF/1
+  Use GCC 4.6.4 (the last supported version) for all Tru64 targets.
+  Tru64 5.1B is the final release; use triple alpha-dec-osf5.1.
+  The sysroot needs: /usr/include, /usr/lib, /usr/shlib, /usr/ccs/lib
+  Tru64's math library (CXML) may be separately licensed.
+  For alpha EV6 optimization: -mcpu=ev6 -mtune=ev6
+
+IRIX
+  IRIX 6.5 is the final and most common release.
+  The three ABIs require different sysroots or multilib configuration:
+    o32: mips-sgi-irix6.5-gcc -mabi=32
+    n32: mips-sgi-irix6.5-gcc -mabi=n32   (default)
+    n64: mips-sgi-irix6.5-gcc -mabi=64
+  Use --disable-multilib at configure time (the script does this) and
+  specify the ABI at compile time. Multiple builds (one per ABI) may be
+  needed for a complete toolchain.
+  IRIX development headers from /usr/include on the SGI workstation.
+
+BSD PLATFORMS
+  Cross-compiling to BSD is straightforward. The target triple includes
+  the version number; pick the exact version of the target OS.
+  For old FreeBSD 2.x/3.x (a.out format), use GCC 3.4.6 and binutils 2.17.
+  For modern NetBSD/FreeBSD/OpenBSD, any current GCC works.
+
+LINUX
+  Cross-compiling Linux-to-Linux is common for embedded targets or different
+  architectures. The sysroot should contain glibc headers matching the
+  target distribution:
+    Ubuntu 22.04 x86_64: glibc 2.35
+    RHEL 7 x86_64: glibc 2.17
+    Debian Buster armhf: glibc 2.28
+  For musl-based targets: use i686-linux-musl or x86_64-linux-musl triples.
+
+SCO / UNIXWARE
+  SCO OpenServer 5.x and UnixWare 7.x use SVR4-based ELF.
+  GCC support for these platforms was maintained through GCC 4.9.x.
+  Headers from /usr/include on the SCO/UW system.
+  These are i386-only targets.
+
+
+8. BUILDING OLD GCC VERSIONS ON MODERN HOSTS
+----------------------------------------------
+Building GCC 2.95.x or GCC 3.x with a modern host GCC (5+) requires
+patches and workarounds. The build script applies these automatically.
+
+ISSUES AND FIXES:
+
+a) getline() naming conflict (GCC 2.95.x, some 3.x):
+   Problem:  Modern glibc defines getline() in <stdio.h>; libiberty also
+             defines getline(), causing a redefinition error.
+   Fix:      The script patches libiberty/getline.c to rename the function
+             to libiberty_getline().
+
+b) Implicit function declarations (GCC 2.95.x, 3.x):
+   Problem:  K&R-era code assumes undeclared functions return int; modern
+             compilers (GCC 6+) reject this by default.
+   Fix:      Add -Wno-implicit-function-declaration -Wno-int-conversion to
+             CFLAGS_FOR_BUILD. Script does this automatically.
+
+c) alloca() declarations:
+   Problem:  alloca() header changed between systems.
+   Fix:      Patch with -DHAVE_ALLOCA_H=1 or add explicit #include.
+
+d) String literal type (GCC 2.95.x):
+   Problem:  Assigning string literals to char* (not const char*).
+   Fix:      -fpermissive for the host C++ compilation.
+
+e) Conflicting types in system headers vs GCC internals:
+   Problem:  Modern system headers define types that old GCC headers also define.
+   Fix:      Various per-file patches; the script handles common cases.
+
+f) Modern binutils incompatibility:
+   Problem:  Old GCC may generate assembler directives rejected by newer gas.
+   Fix:      Use older binutils for the host build (not the cross-binutils).
+   Note:     The CROSS-binutils (targeting the old platform) can be modern.
+
+Recommendation for GCC 2.95.x builds:
+  Usually works with the automatic patches applied by the build scripts.
+  If the build fails, set HOST_CC=gcc-4.7 if that version is installed
+  alongside your default GCC.  The build scripts do not require containers.
+
+For GCC 3.4.6 on modern Linux:
+  Usually works with --disable-werror and the CFLAGS patches.
+  Tested successfully with host GCC 8.x and 9.x.
+
+For GCC 4.6.x (Tru64's last GCC):
+  Builds cleanly on modern Linux with minimal patching.
+  May need --disable-werror for binutils compatibility.
+
+
+9. LINUX libc4 AND libc5 SYSROOT SETUP
+----------------------------------------
+Linux targets before glibc2 use different C libraries and object formats.
+The build script supports them as distinct platform names:
+
+  Platform name  Kernel   C library  Object format  GCC version range
+  -------------------------------------------------------------------
+  linux1         1.0-1.2  libc4      a.out          GCC 2.5 - 2.7.2.3
+  linux2         2.0-2.2  libc5      ELF            GCC 2.5 - 2.95.3
+
+Usage:
+  ./build-cross.sh linux1 1.0   # Linux 1.0 / libc4 / a.out
+  ./build-cross.sh linux2 2.0   # Linux 2.0 / libc5 / ELF
+  ./build-cross.sh linux2 2.2   # Linux 2.2 / libc5 / ELF
+
+Aliases: linux-libc4, linux-aout, linux-libc5, linuxelf
+
+LINUX 1.x (libc4 / a.out) SYSROOT:
+
+The sysroot must contain Linux 1.0 kernel headers and the libc4 C library
+(BSD-based C library, a.out format).
+
+Target triple:   i486-linux
+Default GCC:     2.7.2.3
+Default binutils: 2.5.2  (produces a.out output by default)
+
+Step 1 - Create directories:
+  mkdir -p /opt/sysroots/i486-linux/usr/include
+  mkdir -p /opt/sysroots/i486-linux/usr/lib
+  mkdir -p /opt/sysroots/i486-linux/lib
+
+Step 2 - Linux 1.0 kernel headers:
+  wget https://mirrors.kernel.org/pub/linux/kernel/v1.0/linux-1.0.tar.gz
+  tar xzf linux-1.0.tar.gz
+  cp -r linux-1.0/include/linux   /opt/sysroots/i486-linux/usr/include/
+  cp -r linux-1.0/include/asm-i386 /opt/sysroots/i486-linux/usr/include/asm
+
+Step 3 - libc4 headers and library:
+  Method A: Extract from Slackware 1.x or SLS 1.05 disk images
+    (Available at: https://archive.org/details/slackware-linux-1.0)
+  Method B: Extract from an early Linux archive tarball
+    (Search archive.org for "mcc-interim-linux" or "sls-linux-1.05")
+  Method C: Build libc4 from source (linux-lib.tar.gz from early mirrors)
+
+  After obtaining libc4 files:
+    cp stdio.h stdlib.h string.h unistd.h errno.h /opt/sysroots/i486-linux/usr/include/
+    cp libc.a  /opt/sysroots/i486-linux/usr/lib/
+    cp crt0.o  /opt/sysroots/i486-linux/usr/lib/
+
+Step 4 - Verify:
+  ls /opt/sysroots/i486-linux/usr/include/stdio.h       # libc4 header
+  ls /opt/sysroots/i486-linux/usr/include/linux/version.h # kernel header
+  ls /opt/sysroots/i486-linux/usr/lib/libc.a            # libc4 library
+  ls /opt/sysroots/i486-linux/usr/lib/crt0.o            # a.out startup file
+
+Note on a.out format: Linux 1.0 uses a.out object format.  Use binutils 2.5.2
+or 2.6 for era-correct a.out output; modern binutils defaults to ELF.
+
+LINUX 2.x (libc5 / ELF) SYSROOT:
+
+The sysroot must contain Linux 2.0 kernel headers, libc5 headers and libraries,
+and the ELF startup files (crt1.o, crti.o, crtn.o).
+
+Target triple:    i486-unknown-linuxelf
+Default GCC:      2.7.2.3
+Default binutils: 2.8.1
+
+Automatic setup (downloads from Debian archive):
+  The script lib/libc5-sysroot.sh includes an automated setup function.
+  Usage (from a script that sources libc5-sysroot.sh):
+    setup_libc5_sysroot_from_debian /opt/sysroots/i486-unknown-linuxelf /tmp/libc5-work
+
+Manual setup:
+
+Step 1 - Create directories:
+  mkdir -p /opt/sysroots/i486-unknown-linuxelf/usr/include
+  mkdir -p /opt/sysroots/i486-unknown-linuxelf/usr/lib
+  mkdir -p /opt/sysroots/i486-unknown-linuxelf/lib
+
+Step 2 - Linux 2.0 kernel headers:
+  wget https://mirrors.kernel.org/pub/linux/kernel/v2.0/linux-2.0.tar.gz
+  tar xzf linux-2.0.tar.gz
+  SYSROOT=/opt/sysroots/i486-unknown-linuxelf
+  cp -r linux-2.0/include/linux    $SYSROOT/usr/include/
+  cp -r linux-2.0/include/asm-i386 $SYSROOT/usr/include/asm
+
+Step 3 - libc5 headers and libraries (Debian "Bo" packages recommended):
+  # Debian 1.3 "Bo" archive (July 1997, last libc5 Debian)
+  SYSROOT=/opt/sysroots/i486-unknown-linuxelf
+  BASE=http://archive.debian.org/debian/dists/bo/main/binary-i386/libs
+
+  wget $BASE/libc5-dev_5.4.46-9_i386.deb
+  wget $BASE/libc5_5.4.46-9_i386.deb
+
+  dpkg -x libc5-dev_5.4.46-9_i386.deb /tmp/libc5-dev
+  dpkg -x libc5_5.4.46-9_i386.deb     /tmp/libc5
+
+  cp -r /tmp/libc5-dev/usr/include/. $SYSROOT/usr/include/
+  cp -r /tmp/libc5-dev/usr/lib/.     $SYSROOT/usr/lib/
+  cp -r /tmp/libc5/lib/.             $SYSROOT/lib/
+  cp -r /tmp/libc5/usr/lib/.         $SYSROOT/usr/lib/
+
+  Alternative: Red Hat Linux 4.2 RPMs
+    BASE=http://archive.redhat.com/pub/redhat/linux/4.2/i386/RedHat/RPMS
+    wget $BASE/libc-5.3.12-18.i386.rpm
+    wget $BASE/libc-devel-5.3.12-18.i386.rpm
+    rpm2cpio libc-devel-5.3.12-18.i386.rpm | (cd $SYSROOT && cpio -id)
+    rpm2cpio libc-5.3.12-18.i386.rpm       | (cd $SYSROOT && cpio -id)
+
+Step 4 - Ensure dynamic linker symlinks:
+  ln -sfn libc.so.5.x.y    $SYSROOT/lib/libc.so.5
+  ln -sfn ld-linux.so.1.x.y $SYSROOT/lib/ld-linux.so.1
+
+Step 5 - Verify:
+  ls $SYSROOT/usr/include/stdio.h
+  ls $SYSROOT/usr/lib/crt1.o      # ELF startup
+  ls $SYSROOT/usr/lib/crti.o      # ELF init section
+  ls $SYSROOT/usr/lib/crtn.o      # ELF fini section
+  ls $SYSROOT/usr/lib/libc.a
+  ls $SYSROOT/lib/libc.so.5
+
+Testing the cross-compiler:
+  echo 'int main(){return 0;}' > /tmp/test.c
+  i486-unknown-linuxelf-gcc -nostdlib \
+    -o /tmp/test /tmp/test.c \
+    $SYSROOT/usr/lib/crt1.o \
+    $SYSROOT/usr/lib/crti.o \
+    $SYSROOT/usr/lib/crtn.o
+  file /tmp/test   # should show: ELF 32-bit LSB executable, Intel 80386
+
+libc5 vs glibc2 history:
+  Linux distributions began switching to glibc2 (libc6) around 1997-1998.
+  Red Hat Linux 5.0 (October 1997): first major glibc2 distribution.
+  Debian 2.0 "Hamm" (July 1998): completed the Debian transition.
+  For glibc2 cross-compilation, use the standard 'linux' platform type.
+
+EARLY GCC VERSION NOTES FOR LINUX TARGETS:
+
+GCC 2.7.2.3 is the last 2.7.x patch release and is the default for linux1 and 
+linux2.
+GCC 2.95.3 is the last version with strong libc5 cross-compilation support.
+
+Both default to -j1 (serial build) because the Makefiles in this era have
+parallel build dependency problems.
+
+GCC 2.7.2.3 (era2-late) builds with special CFLAGS on modern hosts:
+  CFLAGS="-O1 -fno-strict-aliasing -fgnu89-inline -w"
+Patches applied automatically: getline rename, libiberty alloca, -Werror removal.
+
+For GCC 1.x cross-compilers targeting old Linux:
+  GCC 1.42 supports i386-linux with a.out output.  K&R C source; building on
+  modern hosts requires GCC 2.7.2.3 as an intermediate compiler.  The build
+  scripts handle this automatically (see Section 8, Bootstrap GCC below).
+
+
+10. CANADIAN CROSS: COMPILERS FOR OLD UNIX HOSTS
+--------------------------------------------------
+A "Canadian cross" build produces a toolchain that runs on an old UNIX host
+but generates code for yet another target.
+
+  BUILD:          Modern Linux (builds everything)
+  HOST:           Old UNIX (where the resulting compiler will run)
+  TARGET:         Platform you want to compile code for
+
+Example: Build a compiler that runs on Solaris 2.6 SPARC and targets Tru64:
+  ./build-cross.sh -H sparc-sun-solaris2.6 tru64 5.1
+
+PREREQUISITES:
+
+For a Canadian cross, you need TWO existing cross-compilers before starting:
+
+1. BUILD HOST cross-compiler:
+   A compiler that runs on your Linux build machine and generates code that
+   runs on the old UNIX host (e.g., a Solaris 2.6 SPARC compiler on Linux).
+   Build this first:
+     ./build-cross.sh -a sparc solaris 2.6
+
+2. HOST TARGET cross-binutils:
+   Already handled by the Canadian cross build process, but the host system
+   needs to be able to run the resulting binutils.
+
+PROCEDURE:
+
+Step 1 - Build the BUILD HOST cross-compiler (skip if already done):
+  ./build-cross.sh -a sparc solaris 2.6
+  # Installs sparc-sun-solaris2.6-gcc in /opt/cross/bin
+
+Step 2 - Set up the HOST system sysroot:
+  COMPILER_HOST_SYSROOT=/opt/sysroots/sparc-sun-solaris2.6
+  Populate it the same way as any other sysroot (see Section 4).
+
+Step 3 - Run the Canadian cross build:
+  ./build-cross.sh -H sparc-sun-solaris2.6 -S /mnt/tru64-sysroot tru64 5.1
+
+  Or using environment variables:
+  COMPILER_HOST=sparc-sun-solaris2.6 \
+  COMPILER_HOST_SYSROOT=/opt/sysroots/sparc-sun-solaris2.6 \
+    ./build-cross.sh tru64 5.1
+
+Step 4 - Transfer the toolchain to the old UNIX host:
+  tar -C /opt/cross -czf cross-tru64.tar.gz .
+  rcp cross-tru64.tar.gz oldhost:/opt/cross/
+  rsh oldhost "cd /opt && tar xzf /opt/cross/cross-tru64.tar.gz"
+
+Step 5 - Use on the old host:
+  export PATH=/opt/cross/bin:$PATH
+  alpha-dec-osf5.1-gcc --version
+  alpha-dec-osf5.1-gcc -o program program.c
+
+CANADIAN CROSS WITH VERY OLD GCC:
+
+For cross-compilers that run on very old UNIX systems (e.g., SunOS 4.1.4),
+the toolchain itself must be compiled for that host architecture.
+
+GCC 2.7.2.3 and beyond support Canadian crosses. Be aware of the last versions
+of binutils and GCC that your target and host platform support.
+the full Canadian cross configuration support.
+
+GCC 1.x: Canadian cross support is incomplete or absent.  Use GCC 2.7.2
+at minimum for the resulting toolchain's GCC version.
+
+BOOTSTRAPPING AN OLD UNIX HOST:
+
+If the old UNIX host lacks GNU make, flex, bison, or other required tools,
+use the bootstrap script generator in lib/old-host.sh:
+
+  # Generate a bootstrap script
+  . lib/old-host.sh
+  generate_bootstrap_script /tmp/bootstrap-oldhost.sh
+  # Transfer and run on the old host:
+  rcp /tmp/bootstrap-oldhost.sh oldhost:/tmp/
+  rsh oldhost "sh /tmp/bootstrap-oldhost.sh"
+
+The bootstrap script builds GNU make and other prerequisites from source
+using only the tools typically available on old UNIX systems (cc, tar, sh).
+
+SUPPORTED HOST SYSTEMS FOR CANADIAN CROSS:
+
+The -H / COMPILER_HOST value should be a valid GNU triple for the host:
+  sparc-sun-solaris2.6        Solaris 2.6 SPARC
+  sparc-sun-solaris2.8        Solaris 8 SPARC
+  i386-pc-solaris2.10         Solaris 10 x86
+  rs6000-ibm-aix4.3.3.0       AIX 4.3 RS6000
+  powerpc-ibm-aix5.1.0.0      AIX 5.1 PowerPC
+  hppa2.0w-hp-hpux11.11       HP-UX 11.11 PA-RISC
+  alpha-dec-osf5.1            Tru64 5.1 Alpha
+  mips-sgi-irix6.5            IRIX 6.5 MIPS
+  sparc-sun-sunos4.1.4        SunOS 4.1.4 SPARC
+  i386-unknown-netbsd3.0      NetBSD 3.0 i386
+
+
+11. TROUBLESHOOTING
+-------------------
+
+"configure: error: C compiler cannot create executables"
+  - Host GCC/G++ not working; test with: gcc -v, g++ -v
+  - Ensure build-essential (Debian) or gcc-c++ (RPM) is installed
+  - Try: export CC=gcc CXX=g++ before running the script
+
+"configure: error: no acceptable C compiler found in $PATH"
+  - GCC not in PATH; add /usr/bin to PATH or install gcc
+
+"error: GMP, MPFR, or MPC not found"
+  - For GCC 4.3+, these are required
+  - Install via package manager or the script will attempt to download them
+  - Manual: run ./contrib/download_prerequisites in the GCC source tree
+
+"error: 'getline' was not declared in this scope" (old GCC build)
+  - Old libiberty/glibc conflict; the script patches this automatically
+  - Manually: patch libiberty/getline.c as shown in Section 8
+
+"as: unrecognized option -mXXX"
+  - Wrong assembler is being invoked (host as instead of cross-as)
+  - Verify: which <triple>-as; ensure $CROSS_PREFIX/bin is in PATH before /usr/bin
+
+"ld: cannot find -lc"
+  - Sysroot missing the target libc
+  - Check: ls $SYSROOT/lib/libc* $SYSROOT/usr/lib/libc*
+  - For static: find $SYSROOT -name 'libc.a'
+
+"crti.o: No such file or directory"
+  - Missing C runtime startup files in sysroot
+  - Copy /usr/lib/crt*.o or /usr/ccs/lib/crt*.o from the target
+
+AIX: "XCOFF not supported"
+  - Binutils was built without XCOFF support
+  - Rebuild binutils: pass --enable-targets=powerpc-ibm-aix5.3 or all
+
+HP-UX PA-RISC: "SOM format not supported"
+  - Binutils needs SOM format enabled
+  - Rebuild: ./configure --target=hppa2.0w-hp-hpux11.11 --enable-targets=all
+
+libgcc build fails:
+  - Common with incomplete sysroots
+  - Build without -r flag (builds only the GCC front-end, not runtime libs)
+  - The resulting compiler can still compile and link if the target's
+    native libgcc.a is present in the sysroot
+
+Build speed:
+  - Use -j$(nproc) for parallel builds; GCC is CPU-bound
+  - ccache speeds up repeated builds: export CC="ccache gcc"
+  - A full GCC build takes 30-90 minutes; binutils 10-20 minutes
+
+Verifying the cross-compiler:
+  $CROSS_PREFIX/bin/<triple>-gcc --version
+  $CROSS_PREFIX/bin/<triple>-gcc -v
+  echo 'int main(){return 0;}' | <triple>-gcc -x c - -o /dev/null

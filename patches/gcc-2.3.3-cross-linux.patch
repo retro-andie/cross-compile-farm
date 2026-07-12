@@ -1,0 +1,107 @@
+Patch for building GCC 2.3.3 as a cross-compiler on modern Linux.
+GCC 2.3.3 (1993) was a major improvement over 2.0-2.2 but still has many K&R
+C issues when compiled with GCC 4.x+.
+
+Issues addressed:
+  1. getline conflict in libiberty (glibc 2.9+)
+  2. alloca in libiberty
+  3. strsignal / sys_siglist declaration (same as 2.7.2.3)
+  4. yyerror declaration conflict
+  5. obstack.h guard
+  6. bcopy/bzero/index/rindex BSD functions
+  7. configure uses positional args, not --target= (GCC 2.0-2.2 style)
+     Fixed in 2.3.x but detect and handle both
+  8. INT_MAX / LONG_MAX may not be included without limits.h
+  9. Missing #include <stddef.h> in several files (size_t)
+
+Apply with: patch -p1 -d gcc-2.3.3 < gcc-2.3.3-cross-linux.patch
+
+--- a/libiberty/getline.c
++++ b/libiberty/getline.c
+@@ -1,7 +1,9 @@
+ /* Replacement for getline. */
++#define getline libiberty_getline
++
+ #include <stdio.h>
+ int
+-getline (lineptr, n, stream)
++libiberty_getline (lineptr, n, stream)
+      char **lineptr;
+      size_t *n;
+      FILE *stream;
+--- a/libiberty/alloca.c
++++ b/libiberty/alloca.c
+@@ -1,2 +1,5 @@
+ /* alloca.c -- allocate automatically reclaimed memory */
++#ifdef HAVE_ALLOCA_H
++#  include <alloca.h>
++#endif
+ 
+--- a/libiberty/strsignal.c
++++ b/libiberty/strsignal.c
+@@ -1,4 +1,8 @@
+ /* Extended support for using signal names. */
++#define _GNU_SOURCE 1
+ #include <stdio.h>
+ #include <signal.h>
+-extern char *sys_siglist[];
++#ifndef sys_siglist
++extern const char * const sys_siglist[];
++#endif
++
+--- a/obstack.h
++++ b/obstack.h
+@@ -1,2 +1,5 @@
+ /* obstack.h - declarations for the obstacks package. */
++#ifndef _GCC_OBSTACK_H
++#define _GCC_OBSTACK_H 1
++
+ /* Copyright (C) 1988, 1992, 1993 Free Software Foundation, Inc. */
+--- a/gcc/c-decl.c
++++ b/gcc/c-decl.c
+@@ -28,5 +28,7 @@
+ #include "tree.h"
+ #include "c-tree.h"
+ 
++#ifndef yyerror
+ void yyerror ();
++#endif
+ 
+--- a/gcc/gcc.c
++++ b/gcc/gcc.c
+@@ -1,4 +1,15 @@
+ /* Compiler driver for GCC 2.3. */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
+ 
+ #include "config.h"
+ #include "gansidecl.h"
++
++#ifndef bcopy
++# define bcopy(s,d,n)  memmove((d),(s),(n))
++# define bzero(d,n)    memset((d),0,(n))
++# define bcmp(a,b,n)   memcmp((a),(b),(n))
++#endif
++
+--- a/gcc/toplev.c
++++ b/gcc/toplev.c
+@@ -1,3 +1,8 @@
+ /* Top-level control of GCC 2.3 compilation. */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <limits.h>
++#include <unistd.h>
+ 
+ #include "config.h"
+--- a/gcc/Makefile.in
++++ b/gcc/Makefile.in
+@@ -40,3 +40,6 @@
+ # Compilation flags for host code.
+ CFLAGS = -g
+ 
++# Strip -Werror (old sources produce many warnings on modern compilers)
++override CFLAGS := $(filter-out -Werror,$(CFLAGS))
++

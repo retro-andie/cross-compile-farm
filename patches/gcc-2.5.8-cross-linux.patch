@@ -1,0 +1,128 @@
+Patch for building GCC 2.5.8 as a cross-compiler on modern Linux (glibc 2.9+).
+GCC 2.5.8 (1994) is much more buildable than earlier 2.x but still has
+issues with modern glibc name conflicts and implicit function declarations.
+
+Issues addressed:
+  1. getline conflict in libiberty
+  2. alloca in libiberty
+  3. strsignal / sys_siglist
+  4. fix_proto.c: char* string literals (should be const char*)
+  5. protoize.c: many implicit declarations, string literal types
+  6. c-decl.c: yyerror forward declaration
+  7. bcopy/bzero/bcmp BSD functions (still used in 2.5.x)
+  8. config/i386/xm-linux.h: HAVE_* defines for modern glibc
+  9. Makefile.in: -Werror removal
+  10. collect2.c: exec*() implicit declarations
+
+Apply with: patch -p1 -d gcc-2.5.8 < gcc-2.5.8-cross-linux.patch
+
+--- a/libiberty/getline.c
++++ b/libiberty/getline.c
+@@ -1,7 +1,9 @@
+ /* Replacement for getline. */
++#define getline libiberty_getline
++
+ #include <stdio.h>
+ int
+-getline (lineptr, n, stream)
++libiberty_getline (lineptr, n, stream)
+      char **lineptr;
+      size_t *n;
+      FILE *stream;
+--- a/libiberty/alloca.c
++++ b/libiberty/alloca.c
+@@ -1,2 +1,5 @@
+ /* alloca.c -- allocate automatically reclaimed memory */
++#ifdef HAVE_ALLOCA_H
++#  include <alloca.h>
++#endif
+ 
+--- a/libiberty/strsignal.c
++++ b/libiberty/strsignal.c
+@@ -1,4 +1,8 @@
+ /* Extended support for using signal names. */
++#define _GNU_SOURCE 1
+ #include <stdio.h>
+ #include <signal.h>
+-extern char *sys_siglist[];
++#ifndef sys_siglist
++extern const char * const sys_siglist[];
++#endif
++
+--- a/gcc/c-decl.c
++++ b/gcc/c-decl.c
+@@ -28,5 +28,7 @@
+ #include "tree.h"
+ #include "c-tree.h"
+ #include "flags.h"
++#ifndef yyerror
+ void yyerror ();
++#endif
+ 
+--- a/gcc/fix_proto.c
++++ b/gcc/fix_proto.c
+@@ -35,6 +35,6 @@
+ #include "config.h"
+ #include "system.h"
+ 
+-char *proto_dir;
++const char *proto_dir;
+-char *protoize_dir;
++const char *protoize_dir;
+ 
+--- a/gcc/protoize.c
++++ b/gcc/protoize.c
+@@ -1,4 +1,13 @@
+ /* Protoize - convert old-style function defs to ANSI prototypes. */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
+ 
+ #include "config.h"
+ 
++#ifndef bcopy
++# define bcopy(s,d,n) memmove((d),(s),(n))
++# define bzero(d,n)   memset((d),0,(n))
++#endif
++
+--- a/gcc/collect2.c
++++ b/gcc/collect2.c
+@@ -1,4 +1,13 @@
+ /* collect2 -- collect constructors/destructors for linking. */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
+ 
+ #include "config.h"
+ 
++#ifndef __GLIBC__
++extern int execv ();
++extern int execvp ();
++#endif
++
+--- a/gcc/config/i386/xm-linux.h
++++ b/gcc/config/i386/xm-linux.h
+@@ -1,3 +1,13 @@
+ /* GCC host config for i386/Linux. */
++#ifndef HAVE_GETRLIMIT
++#define HAVE_GETRLIMIT  1
++#define HAVE_SETRLIMIT  1
++#define HAVE_WAITPID    1
++#define HAVE_SYSCONF    1
++#define HAVE_VPRINTF    1
++#define HAVE_PUTENV     1
++#define HAVE_STRSIGNAL  1
++#define HAVE_SYSINFO    1
++#endif
+ 
+ #include "i386/xm-i386.h"
+--- a/gcc/Makefile.in
++++ b/gcc/Makefile.in
+@@ -48,2 +48,5 @@
+ CFLAGS = -g
+ 
++# Strip -Werror so modern host compiler warnings don't abort the build
++override CFLAGS := $(filter-out -Werror,$(CFLAGS))
++

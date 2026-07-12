@@ -1,0 +1,90 @@
+Supplemental patch for building GCC 2.7.2.3 as a CROSS-COMPILER on modern Linux.
+Extends gcc-2.7.2.3-native-linux.patch with cross-specific fixes.
+
+Issues addressed beyond the native patch:
+  1. protoize.c / unprotoize.c: K&R declarations that break with GCC 5+
+  2. fix_proto.c: const char* for global string path variables (proto_dir, protoize_dir)
+  3. collect2.c: implicit declarations of exec*() functions
+  4. cccp.c: bcopy/bzero/index/rindex BSD-ism removal
+
+Apply AFTER gcc-2.7.2.3-native-linux.patch:
+  patch -p1 -d gcc-2.7.2.3 < gcc-2.7.2.3-cross-linux.patch
+
+--- a/gcc/fix_proto.c
++++ b/gcc/fix_proto.c
+@@ -37,7 +37,7 @@
+ #include <signal.h>
+ 
+ /* Directory where we find the target's native include files.  */
+-char *proto_dir;
++const char *proto_dir;
+ /* Directory where we install the fixed include files.  */
+-char *protoize_dir;
++const char *protoize_dir;
+ 
+--- a/gcc/collect2.c
++++ b/gcc/collect2.c
+@@ -1,4 +1,8 @@
+ /* collect2 -- a kludge to run ld, collect constructors/destructors. */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
+ 
+ #include "config.h"
+ 
+@@ -35,4 +39,9 @@
+ #define vfork fork
+ #endif
+ 
++#ifndef __GLIBC__
++extern int execv ();
++extern int execvp ();
++#endif
++
+ /* On certain systems, we have code that works by scanning the object
+--- a/gcc/cccp.c
++++ b/gcc/cccp.c
+@@ -1,4 +1,8 @@
+ /* C Compatible Compiler Preprocessor (CCCP) */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
+ 
+ #include "config.h"
+ 
+@@ -50,3 +54,10 @@
+ #include "pcp.h"
+ #endif
+ 
++/* BSD compatibility: map old names to standard ones.  */
++#ifndef bcopy
++# define bcopy(s,d,n)   memmove(d,s,n)
++# define bzero(d,n)     memset(d,0,n)
++# define bcmp(a,b,n)    memcmp(a,b,n)
++#endif
++
+--- a/gcc/protoize.c
++++ b/gcc/protoize.c
+@@ -1,4 +1,10 @@
+ /* Protoize -- convert old-style function definitions to ANSI prototypes. */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <dirent.h>
++#include <sys/stat.h>
+ 
+ #include "config.h"
+ 
+@@ -40,3 +45,9 @@
+ #include <a.out.h>
+ #endif
+ 
++/* BSD compatibility */
++#ifndef bcopy
++# define bcopy(s,d,n) memmove(d,s,n)
++# define bzero(d,n)   memset(d,0,n)
++#endif
++

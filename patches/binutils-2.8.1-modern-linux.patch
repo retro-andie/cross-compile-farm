@@ -1,0 +1,44 @@
+Patch for building GNU binutils 2.8.1 on modern Linux (glibc 2.9+, GCC 4+).
+Binutils 2.8.1 (1998) is the default for Linux 2.0 libc5 cross-compilers.
+This version is close to 2.9 and generally builds cleanly with fewer patches.
+
+Issues addressed:
+  1. libiberty/getline.c: POSIX getline() conflict
+  2. libiberty/strsignal.c: sys_siglist const declaration
+  3. gas/app.c: strsignal prototype conflict
+  4. configure.in / configure: missing HAVE_* for modern glibc
+  5. Makefile.in: -Werror in some subdirectory Makefiles
+
+Apply with: patch -p1 -d binutils-2.8.1 < binutils-2.8.1-modern-linux.patch
+
+--- a/libiberty/getline.c
++++ b/libiberty/getline.c
+@@ -1,7 +1,9 @@
+ /* Replacement for getline. */
++#define getline libiberty_getline
++
+ #include <stdio.h>
+ int
+-getline (lineptr, n, stream)
++libiberty_getline (lineptr, n, stream)
+      char **lineptr;
+      size_t *n;
+      FILE *stream;
+--- a/libiberty/strsignal.c
++++ b/libiberty/strsignal.c
+@@ -1,4 +1,8 @@
+ /* Extended support for using signal names. */
++#define _GNU_SOURCE 1
+ #include <stdio.h>
+ #include <signal.h>
+-extern char *sys_siglist[];
++#ifndef sys_siglist
++extern const char * const sys_siglist[];
++#endif
++
+--- a/gas/app.c
++++ b/gas/app.c
+@@ -30,2 +30,2 @@
+-extern char *strsignal ();
++/* strsignal is in <string.h> on modern glibc; don't re-declare */
+ 

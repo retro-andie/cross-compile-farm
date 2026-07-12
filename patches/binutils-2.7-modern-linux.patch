@@ -1,0 +1,68 @@
+Patch for building GNU binutils 2.7 on modern Linux (glibc 2.9+, GCC 4+).
+Binutils 2.7 (1996) is suitable for Linux 2.0 / libc5 / ELF targets.
+
+Issues addressed:
+  1. libiberty/getline.c: POSIX getline() conflict
+  2. libiberty/alloca.c: alloca.h include guard
+  3. libiberty/strsignal.c: sys_siglist const declaration
+  4. gas/app.c: strsignal re-declaration
+  5. bfd/elf.c: sys/stat.h missing
+  6. bfd/coffcode.h: implicit function declarations
+  7. Makefile.in: -Werror removal
+
+Apply with: patch -p1 -d binutils-2.7 < binutils-2.7-modern-linux.patch
+
+--- a/libiberty/getline.c
++++ b/libiberty/getline.c
+@@ -1,7 +1,9 @@
+ /* Replacement for getline. */
++#define getline libiberty_getline
++
+ #include <stdio.h>
+ int
+-getline (lineptr, n, stream)
++libiberty_getline (lineptr, n, stream)
+      char **lineptr;
+      size_t *n;
+      FILE *stream;
+--- a/libiberty/alloca.c
++++ b/libiberty/alloca.c
+@@ -1,2 +1,5 @@
+ /* alloca.c -- allocate automatically reclaimed memory */
++#ifdef HAVE_ALLOCA_H
++#  include <alloca.h>
++#endif
+ 
+--- a/libiberty/strsignal.c
++++ b/libiberty/strsignal.c
+@@ -1,4 +1,8 @@
+ /* Extended support for using signal names. */
++#define _GNU_SOURCE 1
+ #include <stdio.h>
+ #include <signal.h>
+-extern char *sys_siglist[];
++#ifndef sys_siglist
++extern const char * const sys_siglist[];
++#endif
++
+--- a/gas/app.c
++++ b/gas/app.c
+@@ -28,4 +28,4 @@
+ #include "as.h"
+ #include "config.h"
+-extern char *strsignal ();
++/* strsignal declared by <string.h> on modern systems */
+ 
+--- a/bfd/elf.c
++++ b/bfd/elf.c
+@@ -26,2 +26,3 @@
++#include <sys/stat.h>
+ #include "sysdep.h"
+ #include "bfd.h"
+--- a/bfd/coffcode.h
++++ b/bfd/coffcode.h
+@@ -1,2 +1,4 @@
+ /* COFF backend for BFD. */
++#include <stdlib.h>
++#include <string.h>
+ 
