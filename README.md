@@ -3,7 +3,7 @@ The cross-compile-farm is a set of shell scripts meant to run on modern Linux an
 
 There are a set of patches for GCC and binutils that will allow versions down to GCC 2.7 to build on modern systems. GCC 1 requires that we use GCC 2.7.2.3 as an intermediate compiler.
 
-
+```
 Full options:
   ./build-cross.sh [options] <platform> <version>  
 
@@ -37,7 +37,7 @@ Environment overrides:
   GNU_MIRROR            GNU FTP mirror (default: https://ftpmirror.gnu.org)  
   COMPILER_HOST         Canadian cross host triple (same as -H)  
   COMPILER_HOST_SYSROOT Sysroot for the COMPILER_HOST system  
-  
+```  
 By default, the last supported GCC and binutils for the target platform is   picked.
 
 We use the GCC major version to roughly split this up into eras.  
