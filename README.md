@@ -40,7 +40,7 @@ Environment overrides:
   
 By default, the last supported GCC and binutils for the target platform is   picked.
 
-We use the GCC major version to roughly split this up into eras.
+We use the GCC major version to roughly split this up into eras.  
 Era 1 - GCC 1.x  
 Early Era 2 - GCC 2.x through 2.7  
 Late Era 2 - GCC 2.7 through 2.95  
